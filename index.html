@@ -1513,13 +1513,9 @@ async function updateDashboardPricesLive() {
       
       const ticker = `${stock.code}.T`;
       const yfiUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`;
-      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yfiUrl)}`;
       
       try {
-        const res = await fetchWithTimeout(proxyUrl, {}, 2000);
-        if (!res.ok) continue;
-        const json = await res.json();
-        const rawData = JSON.parse(json.contents);
+        const rawData = await fetchFromYahooProxy(yfiUrl);
         const result = rawData.chart.result[0];
         if (!result) continue;
         
@@ -1706,13 +1702,9 @@ function initRanking() {
     showToast(`${code} の東証ライブデータを取得中...`, 'info');
     const ticker = `${code}.T`;
     const yfiUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`;
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yfiUrl)}`;
     
     try {
-      const res = await fetchWithTimeout(proxyUrl, {}, 3000);
-      if(!res.ok) throw new Error("CORS Proxy timed out");
-      const json = await res.json();
-      const rawData = JSON.parse(json.contents);
+      const rawData = await fetchFromYahooProxy(yfiUrl);
       const result = rawData.chart.result[0];
       if(!result) throw new Error("Stock not found");
       
@@ -1723,9 +1715,7 @@ function initRanking() {
       let companyName = "";
       try {
         const profileUrl = `https://query1.finance.yahoo.com/v7/finance/options/${ticker}`;
-        const profRes = await fetchWithTimeout(`https://api.allorigins.win/get?url=${encodeURIComponent(profileUrl)}`, {}, 2000);
-        const profJson = await profRes.json();
-        const profData = JSON.parse(profJson.contents);
+        const profData = await fetchFromYahooProxy(profileUrl);
         companyName = profData.optionChain.result[0].quote.shortName || `東証上場企業 ${code}`;
       } catch (e) {
         companyName = `東証上場企業 ${code}`;
@@ -2386,6 +2376,18 @@ async function fetchFromYahooProxy(yfiUrl, isChart = false) {
   
   // Yahoo FinanceへのターゲットURLは常にクリーンに保ち（ strict パラメータ検証を回避 ）、
   // キャッシュ回避用のランダム値はプロキシラッパーのクエリ側に付与します。
+
+  // 0. Vercel上では同一オリジンのAPIを最優先で試す
+  try {
+    const localApiUrl = `/api/yahoo?url=${encodeURIComponent(yfiUrl)}&${cacheBuster}`;
+    const res = await fetchWithTimeout(localApiUrl, {}, timeoutLimit);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && !data.error) return data;
+    }
+  } catch (e) {
+    console.warn('local api/yahoo failed:', e.message);
+  }
   
   // 1. まず高速な corsproxy.io を試行
   try {
